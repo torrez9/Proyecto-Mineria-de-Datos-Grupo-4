@@ -192,8 +192,8 @@ st.markdown('<hr class="section-divider">', unsafe_allow_html=True)
 @st.cache_resource
 def cargar_modelo():
     try:
-        ruta_base = r"E:\Descargas\Proyecto de Minería de Datos – Grupo 4"
-        modelo_path = os.path.join(ruta_base, "modelo_kmeans.pkl")
+        # Para Streamlit Cloud, usa rutas relativas
+        modelo_path = "modelo_kmeans.pkl"
         if os.path.exists(modelo_path):
             modelo = joblib.load(modelo_path)
             return modelo
@@ -207,8 +207,8 @@ def cargar_modelo():
 @st.cache_data
 def cargar_datos_originales():
     try:
-        ruta_base = r"E:\Descargas\Proyecto de Minería de Datos – Grupo 4"
-        ruta_excel = os.path.join(ruta_base, "Online Retail.xlsx")
+        # Para Streamlit Cloud, usa rutas relativas
+        ruta_excel = "Online Retail.xlsx"
         if os.path.exists(ruta_excel):
             df = pd.read_excel(ruta_excel)
             
@@ -219,17 +219,43 @@ def cargar_datos_originales():
             
             return df
         else:
-            st.error("Archivo de datos no encontrado.")
-            return None
+            # Si no existe el archivo, crear datos de ejemplo para demo
+            st.warning("Archivo de datos no encontrado. Usando datos de ejemplo para demostración.")
+            return crear_datos_ejemplo()
     except Exception as e:
         st.error(f"Error cargando dataset: {e}")
-        return None
+        # Crear datos de ejemplo en caso de error
+        return crear_datos_ejemplo()
+
+def crear_datos_ejemplo():
+    """Crear datos de ejemplo para demostración cuando no hay archivo"""
+    np.random.seed(42)
+    n_clientes = 1000
+    
+    datos = {
+        'CustomerID': range(1, n_clientes + 1),
+        'Recency': np.random.gamma(10, 5, n_clientes),
+        'Frequency': np.random.poisson(5, n_clientes),
+        'Monetary': np.random.exponential(100, n_clientes)
+    }
+    
+    df = pd.DataFrame(datos)
+    df.set_index('CustomerID', inplace=True)
+    
+    # Aplicar clustering básico
+    from sklearn.cluster import KMeans
+    scaler = StandardScaler()
+    datos_escalados = scaler.fit_transform(df)
+    kmeans = KMeans(n_clusters=4, random_state=42)
+    df['Cluster'] = kmeans.fit_predict(datos_escalados)
+    
+    return df
 
 @st.cache_data
 def cargar_resultados_rfm():
     try:
-        ruta_base = r"E:\Descargas\Proyecto de Minería de Datos – Grupo 4"
-        csv_path = os.path.join(ruta_base, "resultados_segmentacion.csv")
+        # Para Streamlit Cloud, usa rutas relativas
+        csv_path = "resultados_segmentacion.csv"
         if os.path.exists(csv_path):
             rfm = pd.read_csv(csv_path, index_col=0)
             return rfm
@@ -240,31 +266,27 @@ def cargar_resultados_rfm():
     df = cargar_datos_originales()
     if df is None:
         return None
-        
-    snapshot_date = df["InvoiceDate"].max() + pd.Timedelta(days=1)
     
-    rfm = df.groupby("CustomerID").agg({
-        "InvoiceDate": lambda x: (snapshot_date - x.max()).days,
-        "InvoiceNo": "nunique",
-        "UnitPrice": lambda x: (x * df.loc[x.index, "Quantity"]).sum()
-    }).rename(columns={
-        "InvoiceDate": "Recency",
-        "InvoiceNo": "Frequency",
-        "UnitPrice": "Monetary"
-    })
+    # Si ya tiene cluster, usar directamente
+    if 'Cluster' in df.columns:
+        return df
     
-    # Aplicar clustering si el modelo está disponible
+    # Si no, calcular clustering
     modelo = cargar_modelo()
     if modelo is not None:
         try:
             # Escalar datos para el modelo
             scaler = StandardScaler()
-            rfm_scaled = scaler.fit_transform(rfm[['Recency', 'Frequency', 'Monetary']])
-            rfm['Cluster'] = modelo.predict(rfm_scaled)
+            rfm_scaled = scaler.fit_transform(df[['Recency', 'Frequency', 'Monetary']])
+            df['Cluster'] = modelo.predict(rfm_scaled)
         except Exception as e:
             st.warning(f"No se pudo aplicar el modelo de clustering: {e}")
+            # Clustering básico como fallback
+            from sklearn.cluster import KMeans
+            kmeans = KMeans(n_clusters=4, random_state=42)
+            df['Cluster'] = kmeans.fit_predict(rfm_scaled)
     
-    return rfm
+    return df
 
 # Sidebar para navegación
 st.sidebar.title("Panel de Navegación")
@@ -280,8 +302,8 @@ with st.spinner('Cargando datos...'):
     df_original = cargar_datos_originales()
     rfm_data = cargar_resultados_rfm()
 
-if df_original is None or rfm_data is None:
-    st.error("No se pudieron cargar los datos. Verifica las rutas de archivo.")
+if rfm_data is None:
+    st.error("No se pudieron cargar los datos.")
     st.stop()
 
 # --- SECCIÓN 1: DASHBOARD GENERAL ---
@@ -298,21 +320,30 @@ if opcion == "Dashboard General":
         st.markdown('</div>', unsafe_allow_html=True)
     
     with col2:
-        total_ventas = df_original['Quantity'].sum()
+        if 'Quantity' in df_original.columns:
+            total_ventas = df_original['Quantity'].sum()
+        else:
+            total_ventas = rfm_data['Frequency'].sum() * 10  # Estimación para datos de ejemplo
         st.markdown('<div class="metric-card">', unsafe_allow_html=True)
-        st.metric("Total Productos Vendidos", f"{total_ventas:,}")
+        st.metric("Total Transacciones", f"{total_ventas:,}")
         st.markdown('</div>', unsafe_allow_html=True)
     
     with col3:
-        ingresos_totales = (df_original['Quantity'] * df_original['UnitPrice']).sum()
+        if 'Monetary' in rfm_data.columns:
+            ingresos_totales = rfm_data['Monetary'].sum()
+        else:
+            ingresos_totales = total_ventas * 50  # Estimación para datos de ejemplo
         st.markdown('<div class="metric-card">', unsafe_allow_html=True)
         st.metric("Ingresos Totales", f"${ingresos_totales:,.2f}")
         st.markdown('</div>', unsafe_allow_html=True)
     
     with col4:
-        transacciones_totales = df_original['InvoiceNo'].nunique()
+        if 'Frequency' in rfm_data.columns:
+            transacciones_totales = rfm_data['Frequency'].sum()
+        else:
+            transacciones_totales = total_clientes * 5  # Estimación para datos de ejemplo
         st.markdown('<div class="metric-card">', unsafe_allow_html=True)
-        st.metric("Total Transacciones", f"{transacciones_totales:,}")
+        st.metric("Total Pedidos", f"{transacciones_totales:,}")
         st.markdown('</div>', unsafe_allow_html=True)
     
     st.markdown('<hr class="section-divider">', unsafe_allow_html=True)
@@ -351,7 +382,7 @@ if opcion == "Dashboard General":
             plt.tight_layout()
             st.pyplot(fig)
         else:
-            st.info("No hay datos de segmentación disponibles. Ejecuta el análisis de clustering primero.")
+            st.info("No hay datos de segmentación disponibles.")
     
     with col_right:
         st.markdown('<h3 class="sub-header">Resumen RFM por Segmento</h3>', unsafe_allow_html=True)
@@ -384,9 +415,12 @@ if opcion == "Dashboard General":
             # Mostrar estadísticas generales si no hay clusters
             st.markdown('<div class="info-box">', unsafe_allow_html=True)
             st.markdown("**Estadísticas RFM Generales:**")
-            st.write(f"- **Recencia promedio:** {rfm_data['Recency'].mean():.1f} días")
-            st.write(f"- **Frecuencia promedio:** {rfm_data['Frequency'].mean():.1f} transacciones")
-            st.write(f"- **Valor monetario promedio:** ${rfm_data['Monetary'].mean():.2f}")
+            if 'Recency' in rfm_data.columns:
+                st.write(f"- **Recencia promedio:** {rfm_data['Recency'].mean():.1f} días")
+            if 'Frequency' in rfm_data.columns:
+                st.write(f"- **Frecuencia promedio:** {rfm_data['Frequency'].mean():.1f} transacciones")
+            if 'Monetary' in rfm_data.columns:
+                st.write(f"- **Valor monetario promedio:** ${rfm_data['Monetary'].mean():.2f}")
             st.markdown('</div>', unsafe_allow_html=True)
     
     # Gráficos de distribución RFM
@@ -395,32 +429,35 @@ if opcion == "Dashboard General":
     fig, axes = plt.subplots(1, 3, figsize=(15, 4))
     
     # Recency
-    axes[0].hist(rfm_data['Recency'], bins=30, alpha=0.7, color='#3498db', edgecolor='black')
-    axes[0].set_title('Distribución de Recencia', fontweight='bold', color='#2c3e50')
-    axes[0].set_xlabel('Días desde última compra', color='#2c3e50')
-    axes[0].set_ylabel('Frecuencia', color='#2c3e50')
-    axes[0].tick_params(colors='#2c3e50')
-    axes[0].grid(True, alpha=0.3)
-    axes[0].set_facecolor('#f8f9fa')
+    if 'Recency' in rfm_data.columns:
+        axes[0].hist(rfm_data['Recency'], bins=30, alpha=0.7, color='#3498db', edgecolor='black')
+        axes[0].set_title('Distribución de Recencia', fontweight='bold', color='#2c3e50')
+        axes[0].set_xlabel('Días desde última compra', color='#2c3e50')
+        axes[0].set_ylabel('Frecuencia', color='#2c3e50')
+        axes[0].tick_params(colors='#2c3e50')
+        axes[0].grid(True, alpha=0.3)
+        axes[0].set_facecolor('#f8f9fa')
     
     # Frequency
-    axes[1].hist(rfm_data['Frequency'], bins=30, alpha=0.7, color='#2ecc71', edgecolor='black')
-    axes[1].set_title('Distribución de Frecuencia', fontweight='bold', color='#2c3e50')
-    axes[1].set_xlabel('Número de transacciones', color='#2c3e50')
-    axes[1].set_ylabel('Frecuencia', color='#2c3e50')
-    axes[1].tick_params(colors='#2c3e50')
-    axes[1].grid(True, alpha=0.3)
-    axes[1].set_facecolor('#f8f9fa')
+    if 'Frequency' in rfm_data.columns:
+        axes[1].hist(rfm_data['Frequency'], bins=30, alpha=0.7, color='#2ecc71', edgecolor='black')
+        axes[1].set_title('Distribución de Frecuencia', fontweight='bold', color='#2c3e50')
+        axes[1].set_xlabel('Número de transacciones', color='#2c3e50')
+        axes[1].set_ylabel('Frecuencia', color='#2c3e50')
+        axes[1].tick_params(colors='#2c3e50')
+        axes[1].grid(True, alpha=0.3)
+        axes[1].set_facecolor('#f8f9fa')
     
     # Monetary
-    monetary_filtered = rfm_data[rfm_data['Monetary'] < rfm_data['Monetary'].quantile(0.95)]['Monetary']
-    axes[2].hist(monetary_filtered, bins=30, alpha=0.7, color='#e74c3c', edgecolor='black')
-    axes[2].set_title('Distribución de Valor Monetario (95% percentil)', fontweight='bold', color='#2c3e50')
-    axes[2].set_xlabel('Valor total ($)', color='#2c3e50')
-    axes[2].set_ylabel('Frecuencia', color='#2c3e50')
-    axes[2].tick_params(colors='#2c3e50')
-    axes[2].grid(True, alpha=0.3)
-    axes[2].set_facecolor('#f8f9fa')
+    if 'Monetary' in rfm_data.columns:
+        monetary_filtered = rfm_data[rfm_data['Monetary'] < rfm_data['Monetary'].quantile(0.95)]['Monetary']
+        axes[2].hist(monetary_filtered, bins=30, alpha=0.7, color='#e74c3c', edgecolor='black')
+        axes[2].set_title('Distribución de Valor Monetario (95% percentil)', fontweight='bold', color='#2c3e50')
+        axes[2].set_xlabel('Valor total ($)', color='#2c3e50')
+        axes[2].set_ylabel('Frecuencia', color='#2c3e50')
+        axes[2].tick_params(colors='#2c3e50')
+        axes[2].grid(True, alpha=0.3)
+        axes[2].set_facecolor('#f8f9fa')
     
     fig.patch.set_facecolor('#f8f9fa')
     plt.tight_layout()
@@ -431,7 +468,7 @@ elif opcion == "Análisis de Segmentos":
     st.markdown('<h2 class="sub-header">Análisis Detallado por Segmento</h2>', unsafe_allow_html=True)
     
     if 'Cluster' not in rfm_data.columns:
-        st.warning("No se encontraron datos de segmentación. Ejecuta primero el análisis de clustering.")
+        st.warning("No se encontraron datos de segmentación.")
         st.stop()
     
     # Selector de segmento
@@ -453,88 +490,102 @@ elif opcion == "Análisis de Segmentos":
         st.markdown('</div>', unsafe_allow_html=True)
     
     with col2:
+        if 'Recency' in segmento_data.columns:
+            recencia_promedio = segmento_data['Recency'].mean()
+        else:
+            recencia_promedio = 0
         st.markdown('<div class="metric-card">', unsafe_allow_html=True)
-        st.metric("Recencia Promedio", f"{segmento_data['Recency'].mean():.1f} días")
+        st.metric("Recencia Promedio", f"{recencia_promedio:.1f} días")
         st.markdown('</div>', unsafe_allow_html=True)
     
     with col3:
+        if 'Frequency' in segmento_data.columns:
+            frecuencia_promedio = segmento_data['Frequency'].mean()
+        else:
+            frecuencia_promedio = 0
         st.markdown('<div class="metric-card">', unsafe_allow_html=True)
-        st.metric("Frecuencia Promedio", f"{segmento_data['Frequency'].mean():.1f}")
+        st.metric("Frecuencia Promedio", f"{frecuencia_promedio:.1f}")
         st.markdown('</div>', unsafe_allow_html=True)
     
     with col4:
+        if 'Monetary' in segmento_data.columns:
+            valor_promedio = segmento_data['Monetary'].mean()
+        else:
+            valor_promedio = 0
         st.markdown('<div class="metric-card">', unsafe_allow_html=True)
-        st.metric("Valor Promedio", f"${segmento_data['Monetary'].mean():.2f}")
+        st.metric("Valor Promedio", f"${valor_promedio:.2f}")
         st.markdown('</div>', unsafe_allow_html=True)
     
     st.markdown('<hr class="section-divider">', unsafe_allow_html=True)
     
     # Visualizaciones comparativas
-    col_viz1, col_viz2 = st.columns(2)
-    
-    with col_viz1:
-        st.markdown('<h3 class="sub-header">Comparación de Recencia</h3>', unsafe_allow_html=True)
-        fig, ax = plt.subplots(figsize=(10, 5))
+    if 'Recency' in rfm_data.columns and 'Monetary' in rfm_data.columns:
+        col_viz1, col_viz2 = st.columns(2)
         
-        for cluster in segmentos_disponibles:
-            data_cluster = rfm_data[rfm_data['Cluster'] == cluster]['Recency']
-            color = '#e74c3c' if cluster == segmento_seleccionado else '#bdc3c7'
-            alpha = 0.8 if cluster == segmento_seleccionado else 0.4
-            label = f'Segmento {cluster}' if cluster == segmento_seleccionado else f'Seg {cluster}'
-            ax.hist(data_cluster, bins=15, alpha=alpha, label=label, color=color)
+        with col_viz1:
+            st.markdown('<h3 class="sub-header">Comparación de Recencia</h3>', unsafe_allow_html=True)
+            fig, ax = plt.subplots(figsize=(10, 5))
+            
+            for cluster in segmentos_disponibles:
+                data_cluster = rfm_data[rfm_data['Cluster'] == cluster]['Recency']
+                color = '#e74c3c' if cluster == segmento_seleccionado else '#bdc3c7'
+                alpha = 0.8 if cluster == segmento_seleccionado else 0.4
+                label = f'Segmento {cluster}' if cluster == segmento_seleccionado else f'Seg {cluster}'
+                ax.hist(data_cluster, bins=15, alpha=alpha, label=label, color=color)
+            
+            ax.set_xlabel('Recencia (días)', color='#2c3e50')
+            ax.set_ylabel('Frecuencia', color='#2c3e50')
+            ax.set_title('Distribución de Recencia por Segmento', fontweight='bold', color='#2c3e50')
+            ax.tick_params(colors='#2c3e50')
+            ax.legend()
+            ax.grid(True, alpha=0.3)
+            ax.set_facecolor('#f8f9fa')
+            fig.patch.set_facecolor('#f8f9fa')
+            plt.tight_layout()
+            st.pyplot(fig)
         
-        ax.set_xlabel('Recencia (días)', color='#2c3e50')
-        ax.set_ylabel('Frecuencia', color='#2c3e50')
-        ax.set_title('Distribución de Recencia por Segmento', fontweight='bold', color='#2c3e50')
-        ax.tick_params(colors='#2c3e50')
-        ax.legend()
-        ax.grid(True, alpha=0.3)
-        ax.set_facecolor('#f8f9fa')
-        fig.patch.set_facecolor('#f8f9fa')
-        plt.tight_layout()
-        st.pyplot(fig)
-    
-    with col_viz2:
-        st.markdown('<h3 class="sub-header">Comparación de Valor Monetario</h3>', unsafe_allow_html=True)
-        fig, ax = plt.subplots(figsize=(10, 5))
-        
-        for cluster in segmentos_disponibles:
-            data_cluster = rfm_data[rfm_data['Cluster'] == cluster]['Monetary']
-            # Filtrar outliers para mejor visualización
-            data_cluster = data_cluster[data_cluster < data_cluster.quantile(0.95)]
-            color = '#27ae60' if cluster == segmento_seleccionado else '#bdc3c7'
-            alpha = 0.8 if cluster == segmento_seleccionado else 0.4
-            label = f'Segmento {cluster}' if cluster == segmento_seleccionado else f'Seg {cluster}'
-            ax.hist(data_cluster, bins=15, alpha=alpha, label=label, color=color)
-        
-        ax.set_xlabel('Valor Monetario ($)', color='#2c3e50')
-        ax.set_ylabel('Frecuencia', color='#2c3e50')
-        ax.set_title('Distribución de Valor por Segmento', fontweight='bold', color='#2c3e50')
-        ax.tick_params(colors='#2c3e50')
-        ax.legend()
-        ax.grid(True, alpha=0.3)
-        ax.set_facecolor('#f8f9fa')
-        fig.patch.set_facecolor('#f8f9fa')
-        plt.tight_layout()
-        st.pyplot(fig)
+        with col_viz2:
+            st.markdown('<h3 class="sub-header">Comparación de Valor Monetario</h3>', unsafe_allow_html=True)
+            fig, ax = plt.subplots(figsize=(10, 5))
+            
+            for cluster in segmentos_disponibles:
+                data_cluster = rfm_data[rfm_data['Cluster'] == cluster]['Monetary']
+                # Filtrar outliers para mejor visualización
+                data_cluster = data_cluster[data_cluster < data_cluster.quantile(0.95)]
+                color = '#27ae60' if cluster == segmento_seleccionado else '#bdc3c7'
+                alpha = 0.8 if cluster == segmento_seleccionado else 0.4
+                label = f'Segmento {cluster}' if cluster == segmento_seleccionado else f'Seg {cluster}'
+                ax.hist(data_cluster, bins=15, alpha=alpha, label=label, color=color)
+            
+            ax.set_xlabel('Valor Monetario ($)', color='#2c3e50')
+            ax.set_ylabel('Frecuencia', color='#2c3e50')
+            ax.set_title('Distribución de Valor por Segmento', fontweight='bold', color='#2c3e50')
+            ax.tick_params(colors='#2c3e50')
+            ax.legend()
+            ax.grid(True, alpha=0.3)
+            ax.set_facecolor('#f8f9fa')
+            fig.patch.set_facecolor('#f8f9fa')
+            plt.tight_layout()
+            st.pyplot(fig)
     
     # Top clientes del segmento
     st.markdown('<h3 class="sub-header">Top 10 Clientes del Segmento</h3>', unsafe_allow_html=True)
     
-    top_clientes = segmento_data.nlargest(10, 'Monetary')[['Recency', 'Frequency', 'Monetary']]
-    top_clientes_display = top_clientes.copy()
-    top_clientes_display.index.name = 'CustomerID'
-    
-    st.markdown('<div class="dataframe-container">', unsafe_allow_html=True)
-    st.dataframe(
-        top_clientes_display.style.format({
-            'Monetary': '${:,.2f}',
-            'Recency': '{:.0f} días',
-            'Frequency': '{:.0f}'
-        }),
-        use_container_width=True
-    )
-    st.markdown('</div>', unsafe_allow_html=True)
+    if 'Monetary' in segmento_data.columns:
+        top_clientes = segmento_data.nlargest(10, 'Monetary')[['Recency', 'Frequency', 'Monetary']]
+        top_clientes_display = top_clientes.copy()
+        top_clientes_display.index.name = 'CustomerID'
+        
+        st.markdown('<div class="dataframe-container">', unsafe_allow_html=True)
+        st.dataframe(
+            top_clientes_display.style.format({
+                'Monetary': '${:,.2f}',
+                'Recency': '{:.0f} días',
+                'Frequency': '{:.0f}'
+            }),
+            use_container_width=True
+        )
+        st.markdown('</div>', unsafe_allow_html=True)
 
 # --- SECCIÓN 3: BUSCAR CLIENTE ---
 elif opcion == "Buscar Cliente":
@@ -557,13 +608,21 @@ elif opcion == "Buscar Cliente":
                 st.markdown('</div>', unsafe_allow_html=True)
             
             with col2:
+                if 'Recency' in cliente_data:
+                    recencia = cliente_data['Recency']
+                else:
+                    recencia = 0
                 st.markdown('<div class="metric-card">', unsafe_allow_html=True)
-                st.metric("Recencia", f"{cliente_data['Recency']:.0f} días")
+                st.metric("Recencia", f"{recencia:.0f} días")
                 st.markdown('</div>', unsafe_allow_html=True)
             
             with col3:
+                if 'Frequency' in cliente_data:
+                    frecuencia = cliente_data['Frequency']
+                else:
+                    frecuencia = 0
                 st.markdown('<div class="metric-card">', unsafe_allow_html=True)
-                st.metric("Frecuencia", f"{cliente_data['Frequency']:.0f}")
+                st.metric("Frecuencia", f"{frecuencia:.0f}")
                 st.markdown('</div>', unsafe_allow_html=True)
             
             with col4:
@@ -580,12 +639,16 @@ elif opcion == "Buscar Cliente":
             col_valor, col_comparativa = st.columns([1, 2])
             
             with col_valor:
+                if 'Monetary' in cliente_data:
+                    valor_monetario = cliente_data['Monetary']
+                else:
+                    valor_monetario = 0
                 st.markdown('<div class="metric-card">', unsafe_allow_html=True)
-                st.metric("Valor Monetario Total", f"${cliente_data['Monetary']:,.2f}")
+                st.metric("Valor Monetario Total", f"${valor_monetario:,.2f}")
                 st.markdown('</div>', unsafe_allow_html=True)
             
             # Comparación con el segmento
-            if 'Cluster' in cliente_data:
+            if 'Cluster' in cliente_data and 'Recency' in cliente_data and 'Frequency' in cliente_data and 'Monetary' in cliente_data:
                 segmento_cliente = cliente_data['Cluster']
                 segmento_promedio = rfm_data[rfm_data['Cluster'] == segmento_cliente].mean()
                 
@@ -692,7 +755,7 @@ elif opcion == "Recomendaciones Estratégicas":
     if segmento_recomendaciones in recomendaciones:
         info = recomendaciones[segmento_recomendaciones]
         
-        # Header del segmento - CORREGIDO: Texto visible
+        # Header del segmento
         st.markdown(f"""
         <div class="cluster-info">
             <h3>{info["nombre"]}</h3>
@@ -746,30 +809,33 @@ elif opcion == "Recomendaciones Estratégicas":
                     </div>
                     """, unsafe_allow_html=True)
                     
-                    st.markdown(f"""
-                    <div class="stat-card">
-                        <h4>Valor Promedio</h4>
-                        <div class="value">${segmento_stats['Monetary'].mean():.2f}</div>
-                        <div class="subvalue">por cliente</div>
-                    </div>
-                    """, unsafe_allow_html=True)
+                    if 'Monetary' in segmento_stats.columns:
+                        st.markdown(f"""
+                        <div class="stat-card">
+                            <h4>Valor Promedio</h4>
+                            <div class="value">${segmento_stats['Monetary'].mean():.2f}</div>
+                            <div class="subvalue">por cliente</div>
+                        </div>
+                        """, unsafe_allow_html=True)
                 
                 with col2:
-                    st.markdown(f"""
-                    <div class="stat-card">
-                        <h4>Recencia</h4>
-                        <div class="value">{segmento_stats['Recency'].mean():.1f}</div>
-                        <div class="subvalue">días promedio</div>
-                    </div>
-                    """, unsafe_allow_html=True)
+                    if 'Recency' in segmento_stats.columns:
+                        st.markdown(f"""
+                        <div class="stat-card">
+                            <h4>Recencia</h4>
+                            <div class="value">{segmento_stats['Recency'].mean():.1f}</div>
+                            <div class="subvalue">días promedio</div>
+                        </div>
+                        """, unsafe_allow_html=True)
                     
-                    st.markdown(f"""
-                    <div class="stat-card">
-                        <h4>Frecuencia</h4>
-                        <div class="value">{segmento_stats['Frequency'].mean():.1f}</div>
-                        <div class="subvalue">transacciones</div>
-                    </div>
-                    """, unsafe_allow_html=True)
+                    if 'Frequency' in segmento_stats.columns:
+                        st.markdown(f"""
+                        <div class="stat-card">
+                            <h4>Frecuencia</h4>
+                            <div class="value">{segmento_stats['Frequency'].mean():.1f}</div>
+                            <div class="subvalue">transacciones</div>
+                        </div>
+                        """, unsafe_allow_html=True)
     
     # Resumen ejecutivo
     st.markdown('<hr class="section-divider">', unsafe_allow_html=True)
@@ -805,7 +871,6 @@ with st.sidebar:
     st.markdown("---")
     st.markdown("### Información del Sistema")
     st.write(f"**Clientes cargados:** {len(rfm_data):,}")
-    st.write(f"**Transacciones:** {len(df_original):,}")
     if 'Cluster' in rfm_data.columns:
         st.write(f"**Segmentos:** {rfm_data['Cluster'].nunique()}")
     st.write(f"**Última actualización:** {pd.Timestamp.now().strftime('%Y-%m-%d %H:%M')}")
