@@ -864,7 +864,20 @@ elif opcion == "Recomendaciones Estratégicas":
 # Footer
 st.markdown('<hr class="section-divider">', unsafe_allow_html=True)
 st.markdown("**Proyecto de Minería de Datos - Grupo 4** | *Sistema de clasificación de clientes según patrones de compra*")
-st.markdown("Desarrollado con Streamlit")
+st.markdown("""
+### 💻 Desarrollado con Streamlit
+
+---
+
+### 👥 Integrantes
+- Darwin Torrez  
+- Harold Gustavo  
+- Harold Gustavo  
+- Mangel Isacc  
+- Mario Acuña  
+- Kevin David
+""")
+
 
 # Información del sistema en sidebar
 with st.sidebar:

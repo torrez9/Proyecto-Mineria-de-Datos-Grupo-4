@@ -16,4 +16,8 @@ Segmentación de clientes usando análisis RFM y algoritmo K-Means para identifi
 
 ### 👥 Integrantes
 - Darwin Torrez
-- [Otros integrantes]
+- Harold Gustavo
+- Harold Gustavo
+- Mangel Isacc
+- Mario Acuña
+- Kevin David
